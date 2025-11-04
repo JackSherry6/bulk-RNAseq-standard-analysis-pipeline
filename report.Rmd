@@ -1,0 +1,288 @@
+
+Set my working directory to this project folder because for some reason it wasn't before
+```{r setup, include=FALSE}
+setwd("/projectnb/bf528/students/jgsherry/project-2-JackSherry6")
+```
+
+Load in some libraries
+```{r}
+library(DESeq2)
+library(tidyverse)
+library(dplyr)
+```
+
+Read in gene expression data for all samples from csv file
+```{r}
+comb_matrix <- read_csv("results/combined_matrix.csv")
+comb_matrix
+```
+
+
+Filter out genes with low expression levels
+```{r}
+keep <- rowSums(comb_matrix >= 10) >= 2
+#keep <- comb_matrix[rowSums(comb_matrix == 0) != ncol(comb_matrix), ]
+counts_filtered <- comb_matrix[keep, ]
+#reorder gene columns below
+counts_filtered <- counts_filtered[, c("gene","control_rep1","control_rep2","control_rep3","exp_rep1","exp_rep2","exp_rep3")]
+counts_filtered <- counts_filtered %>% column_to_rownames(var = "gene") %>%  as.matrix() 
+nrow(counts_filtered)
+head(counts_filtered)
+```
+
+
+
+
+Create a dataframe of column data to use in our DESeq function
+```{r}
+colData <- data.frame(
+  sample = c("control_rep1","control_rep2","control_rep3","exp_rep1","exp_rep2","exp_rep3"),
+  group = c("control","control","control","exp","exp","exp")
+)
+colData
+```
+
+
+Run DESEQ on our filtered count data by group (control/exp)
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = counts_filtered, 
+                                colData = colData, 
+                                design = ~ group)
+```
+
+Finish running DESeq
+```{r}
+dds <- DESeq(dds)
+res <- results(dds, contrast=c("group","control","exp"))
+```
+
+Format the DESeq data in a tible dataframe
+```{r}
+resOrdered <- res[order(res$padj),]
+deseq2_res <- as_tibble(resOrdered, rownames='gene')
+deseq2_res
+```
+
+
+read gene_names csv file in as a df but change the name of the column to match my DESeq df
+```{r}
+ids <- read_tsv("results/gene_names.csv")
+names(ids)[1] <- "gene"
+ids 
+```
+
+
+Add the gene names to the DESeq dataframe at the second column
+```{r}
+joint_df <- left_join(deseq2_res, ids, by="gene")
+joint_df <- joint_df %>% relocate(gene_name, .after = gene)
+joint_df
+```
+
+
+Order the df based on the adjusted p-value and filter out adjusted p-values above 0.05
+```{r}
+df_padj <- joint_df %>% arrange(padj)
+filter_df <- df_padj %>% filter(padj < 0.05)
+filter_df
+```
+After filtering for genes with a padj below 0.05, I am left with 133 genes for my DAVID and ENRICHR analyses.
+
+
+```{r}
+test_df <- filter_df %>% drop_na()
+test_df
+```
+
+Running ENRICHR
+```{r}
+library(enrichR)
+dbs_to_use <- c("GO_Biological_Process_2023", "KEGG_2021_Human")
+gene_list <- filter_df$gene_name
+enrich_results <- enrichr(gene_list, dbs_to_use)
+head(enrich_results)
+```
+
+Saving GO and KEGG files 
+```{r}
+write.csv(enrich_results[["GO_Biological_Process_2023"]],
+          "GO_BP_enrichr_results.csv", row.names = FALSE)
+write.csv(enrich_results[["KEGG_2021_Human"]],
+          "KEGG_enrichr_results.csv", row.names = FALSE)
+```
+
+create a top hits dataframe from GO and visualize (only shows top 20)
+```{r}
+library(ggplot2)
+go_df <- read.csv("GO_BP_enrichr_results.csv")
+top_hits <- go_df[order(go_df$Adjusted.P.value), ][1:20, ]
+ggplot(top_hits, aes(x = reorder(Term, -Combined.Score), y = Combined.Score)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(x = "GO Term", y = "Combined Score", title = "Top Enriched GO Terms") +
+  theme_minimal(base_size = 12)
+```
+
+Create a top hits dataframe from KEGG and visualize (only shows top 20)
+```{r}
+enrich_df <- read.csv("KEGG_enrichr_results.csv")
+top_hits <- enrich_df[order(enrich_df$Adjusted.P.value), ][1:20, ]
+ggplot(top_hits, aes(x = reorder(Term, -Combined.Score), y = Combined.Score)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(x = "KEGG term", y = "Combined Score", title = "Top Enriched KEGG Terms") +
+  theme_minimal(base_size = 12)
+```
+
+RNAseq Quality Control using Variance Stabilizing Transformation (VST)
+```{r}
+vsd <- vst(dds, blind = TRUE)
+norm_mat <- assay(vsd)
+```
+
+Get summary statistics table for pca
+```{r}
+pca <- prcomp(t(norm_mat))  # transpose so samples are rows
+summary(pca)
+```
+
+Sample-to-sample distance matrix:
+```{r}
+library(pheatmap)
+library(RColorBrewer)
+
+sampleDists <- dist(t(assay(vsd)))
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- colnames(vsd)
+colnames(sampleDistMatrix) <- colnames(vsd)
+
+colors <- colorRampPalette(rev(brewer.pal(9, "Blues")))(255)
+
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         col = colors,
+         main = "Sample-to-sample distances")
+```
+
+PCA plot with labels
+```{r}
+#plotPCA(vsd, intgroup = "group")
+library(ggplot2)
+p <- plotPCA(vsd, intgroup = "group", returnData = TRUE)  # get the data
+percentVar <- round(100 * attr(p, "percentVar"))           # get variance for axis labels
+
+# Make PCA plot with labels
+ggplot(p, aes(PC1, PC2, color = group, label = name)) +
+  geom_point(size = 3) +
+  geom_text(vjust = -0.5) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  theme_minimal()
+``` 
+
+
+Starting FGSEA analysis
+```{r}
+library(fgsea)
+```
+
+Create a df that hasn't been filtered by padj and is ordered by log2FoldChange descending
+Notes: removed dropNA because they should all be gone
+```{r}
+deseq2_res_ordered <- joint_df %>% 
+  drop_na() %>%
+  distinct(gene_name, .keep_all = TRUE) %>%
+  arrange(desc(log2FoldChange))
+
+fgsea_list <- setNames(deseq2_res_ordered$log2FoldChange, deseq2_res_ordered$gene_name)
+head(fgsea_list, 10)
+```
+
+
+I scped the C2 canonical pathways file from GSEA website to this directory.
+```{r}
+pathways <- gmtPathways("C2_canonical_pathways.gmt")
+head(pathways)
+```
+
+```{r}
+fgseaRes <- fgsea(pathways, fgsea_list, minSize=15, maxSize=500)
+head(fgseaRes[order(pval), ])
+```
+
+
+Get only adjusted p-values below 0.05
+```{r}
+sig_fgsea <- fgseaRes %>% 
+  as_tibble() %>% 
+  filter(padj < 0.05) %>%  
+  arrange(padj)
+
+sig_fgsea
+```
+
+```{r}
+# make a variable containing only the pathways we want to plot based on our significance results
+allPathways <- sig_fgsea$pathway[order(sig_fgsea$NES, decreasing = TRUE)]
+
+# Plot all pathways ordered by NES
+plotGseaTable(pathways[allPathways], fgsea_list, sig_fgsea, gseaParam = 0.5)
+```
+
+Figure 3F:
+```{r}
+alt_fgsea <- fgseaRes %>% 
+  as_tibble() %>% 
+  filter(padj < 0.25) %>%  
+  arrange(padj)
+
+ggplot(alt_fgsea, aes(x = NES, y = reorder(pathway, NES))) +
+  geom_point(aes(size = -log10(padj), color = NES)) +
+  scale_color_gradient2(low = "blue", mid = "white", high = "red") +
+  labs(x = "Normalized Enrichment Score (NES)", y = "Pathway", size = "-log10(padj)", color = "NES",
+      title = "Top Enriched Pathways (fgsea)") +
+  theme_bw()
+```
+Was unable to get the colors swapped but it should convey the same information.
+
+Volcano plot:
+```{r}
+# setting these has been the only way I can get the labels to fit correctly (probably not the most efficient way though)
+padj_threshold <- 0.05
+log2FC_threshold <- 1
+
+# Add a color column for left/right coloring
+filter_df$Color <- ifelse(
+  filter_df$padj < padj_threshold & filter_df$log2FoldChange < -log2FC_threshold, "blue",
+  ifelse(filter_df$padj < padj_threshold & filter_df$log2FoldChange > log2FC_threshold, "pink", "grey")
+)
+
+# Top 
+top_up <- filter_df[filter_df$Color == "pink", ]
+top_up <- top_up[order(top_up$padj), ][1:min(10, nrow(top_up)), ]
+
+top_down <- filter_df[filter_df$Color == "blue", ]
+top_down <- top_down[order(top_down$padj), ][1:min(10, nrow(top_down)), ]
+
+top_genes <- rbind(top_up, top_down)
+
+ggplot(filter_df, aes(x = log2FoldChange, y = -log10(padj), color = Color)) +
+  geom_point(alpha = 0.8, size = 2) +
+  geom_text(
+    data = top_genes,
+    aes(label = gene_name),
+    vjust = -0.5, # vertical adjustment
+    hjust = 0.5,  # horizontal adjustment
+    size = 3
+  ) +
+  scale_color_manual(values = c("blue" = "blue", "pink" = "pink", "grey" = "grey")) +
+  theme_minimal() +
+  xlab("Expression Difference (log2 Fold Change)") +
+  ylab("Significance (-log10 Adjusted p-value)") +
+  ggtitle("Volcano Plot of Differential Expression") +
+  theme(legend.title = element_blank())
+```
+Compare how many significant genes are up- and down-regulated in their findings and yours (using their significance threshold). 
+Ensure you list how many you find vs. how many they report.
+

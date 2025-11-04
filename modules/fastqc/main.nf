@@ -1,0 +1,25 @@
+#!/usr/bin/bash nextflow
+
+process FASTQC {
+    label 'process_low'
+    container 'ghcr.io/bf528/fastqc:latest'
+    publishDir params.outdir, mode: "copy"
+
+    input:
+    tuple val(name), path(read)
+
+    output:
+    tuple val(name), path('*.zip'), emit: zip
+    tuple val(name), path('*.html'), emit: html
+
+    script:
+    """
+    fastqc -t $task.cpus $read
+    """
+
+    stub:
+    """
+    touch ${name}_fastqc.zip
+    touch ${name}_fastqc.html
+    """
+}
