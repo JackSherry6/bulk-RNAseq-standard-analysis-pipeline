@@ -4,12 +4,13 @@ This pipeline performs processing of bulk RNA-seq data to quantify gene expressi
 
 ## Table of Contents
 1. Features
-2. Requirements
-3. Installation
-4. Usage
-5. Configuration
-6. Input and Output
-7. Contributing
+2. Workflow Visualization
+3. Requirements
+4. Installation
+5. Usage
+6. Configuration
+7. Input and Output
+8. Contributing
 
 ## Features
 - Modular Nextflow pipeline with clear separation of steps:
@@ -24,6 +25,9 @@ This pipeline performs processing of bulk RNA-seq data to quantify gene expressi
 - Automatic logging and error handling
 - Scalable to large RNA-seq datasets
 - Supports both BU SCC and AWS Batch execution
+
+## Workflow Visualization
+![Mermaid-plot](bin/bulk-rna-seq-mermaid-plot.png)
 
 ## Requirements
 - Must have a conda environment with nextflow in order to run nextflow
