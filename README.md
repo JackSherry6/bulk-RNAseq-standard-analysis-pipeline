@@ -37,7 +37,7 @@ This pipeline performs processing of bulk RNA-seq data to quantify gene expressi
  
 ## Installation
   - Clone this repository in the SCC
-  - git clone 'https://github.com/JackSherry6/Waxman-Lab-snRNA-seq-SNP-Calling-Pipeline.git'
+  - git clone ['https://github.com/JackSherry6/Waxman-Lab-snRNA-seq-SNP-Calling-Pipeline.git'](https://github.com/JackSherry6/bulk-RNAseq-standard-analysis-pipeline.git)
  
 ## Usage
 Basic execution: 
